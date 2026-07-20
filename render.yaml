@@ -1,0 +1,25 @@
+services:
+  - type: web
+    name: jlau-ice-mx-space-core
+    runtime: docker
+    plan: free
+    dockerfilePath: ./dockerfile
+    healthCheckPath: /api/v3/ping
+    autoDeployTrigger: commit
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PG_URL
+        sync: false
+      - key: PG_SSL
+        value: 'true'
+      - key: REDIS_CONNECTION_STRING
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true
+      - key: SNOWFLAKE_WORKER_ID
+        value: '1'
+      - key: ALLOWED_ORIGINS
+        sync: false
+      - key: MX_DISABLE_TELEMETRY
+        value: 'true'
