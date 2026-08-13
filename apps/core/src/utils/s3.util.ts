@@ -213,6 +213,19 @@ export class S3Uploader {
     return S3Uploader.defaultStrategy.resolve(ctx)
   }
 
+  /**
+   * Preserve an endpoint's path prefix for S3-compatible providers such as
+   * Supabase Storage (`/storage/v1/s3`). The prefix must be part of both the
+   * canonical URI used for signing and the final request URL.
+   */
+  private prependEndpointPath(url: URL, canonicalUri: string): string {
+    const endpointPath = url.pathname.replace(/\/+$/, '')
+    if (!endpointPath || endpointPath === '/') {
+      return canonicalUri
+    }
+    return `${endpointPath}${canonicalUri}`
+  }
+
   async uploadImage(imageData: Buffer, path: string): Promise<string> {
     const md5Filename = crypto.createHash('md5').update(imageData).digest('hex')
     const objectKey = `${path}/${md5Filename}.png`
@@ -229,7 +242,7 @@ export class S3Uploader {
     if (this.customDomain && this.customDomain.length > 0) {
       return `${this.customDomain.replace(/\/+$/, '')}/${objectKey}`
     }
-    return `${this.endpoint}/${this.bucket}/${objectKey}`
+    return `${this.endpoint.replace(/\/+$/, '')}/${this.bucket}/${objectKey}`
   }
 
   async uploadBuffer(
@@ -370,7 +383,8 @@ export class S3Uploader {
       encodedObjectKey,
       url.protocol,
     )
-    const { requestHost, canonicalUri } = resolved
+    const { requestHost } = resolved
+    const canonicalUri = this.prependEndpointPath(url, resolved.canonicalUri)
 
     const canonicalQuery = Object.keys(query)
       .sort()
@@ -482,16 +496,20 @@ export class S3Uploader {
     const hashedPayload = crypto.createHash('sha256').update('').digest('hex')
 
     const url = new URL(this.endpoint)
-    const host = url.host
-
     const encodedObjectKey = objectKey
       .split('/')
       .map((seg) => encodeURIComponent(seg))
       .join('/')
-    const canonicalUri = `/${this.bucket}/${encodedObjectKey}`
+    const resolved = this.resolveEndpoint(
+      url.host,
+      encodedObjectKey,
+      url.protocol,
+    )
+    const { requestHost } = resolved
+    const canonicalUri = this.prependEndpointPath(url, resolved.canonicalUri)
 
     const headers: Record<string, string> = {
-      Host: host,
+      Host: requestHost,
       'x-amz-date': xAmzDate,
       'x-amz-content-sha256': hashedPayload,
     }
@@ -536,7 +554,7 @@ export class S3Uploader {
 
     const authorization = `${algorithm} Credential=${this.accessKey}/${credentialScope}, SignedHeaders=${signedHeaders}, Signature=${signature}`
 
-    const requestUrl = `${this.endpoint}${canonicalUri}`
+    const requestUrl = `${resolved.baseUrl}${canonicalUri}`
 
     const fetchOptions: RequestInit & { dispatcher?: unknown } = {
       method: 'DELETE',
@@ -599,7 +617,8 @@ export class S3Uploader {
 
     // Resolve endpoint using the extensible strategy chain
     const resolved = this.resolveEndpoint(host, encodedObjectKey, url.protocol)
-    const { requestHost, canonicalUri } = resolved
+    const { requestHost } = resolved
+    const canonicalUri = this.prependEndpointPath(url, resolved.canonicalUri)
 
     const contentLength = fileData.length.toString()
 

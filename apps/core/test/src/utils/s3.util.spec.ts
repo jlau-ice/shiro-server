@@ -1,6 +1,6 @@
 import { Readable } from 'node:stream'
 
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { S3Uploader } from '~/utils/s3.util'
 
@@ -14,6 +14,11 @@ const createUploader = () =>
     secretKey: 'sk',
     endpoint: 'https://example.r2.cloudflarestorage.com',
   })
+
+afterEach(() => {
+  vi.restoreAllMocks()
+  vi.unstubAllGlobals()
+})
 
 describe('S3Uploader.uploadStream', () => {
   it('uploads equal-length non-trailing parts regardless of chunk boundaries', async () => {
@@ -103,5 +108,105 @@ describe('S3Uploader.uploadStream', () => {
 
     expect(partBodies.length).toBe(1)
     expect(partBodies[0].length).toBe(0)
+  })
+})
+
+describe('S3Uploader endpoint path prefixes', () => {
+  const createSupabaseUploader = () =>
+    new S3Uploader({
+      bucket: 'blog-assets',
+      region: 'ap-southeast-1',
+      accessKey: 'test-access-key',
+      secretKey: 'test-secret-key',
+      endpoint: 'https://project-ref.storage.supabase.co/storage/v1/s3/',
+    })
+
+  it('preserves the endpoint path for uploads', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(new Response(null, { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await createSupabaseUploader().uploadToS3(
+      'images/test.png',
+      Buffer.from('image'),
+      'image/png',
+    )
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://project-ref.storage.supabase.co/storage/v1/s3/blog-assets/images/test.png',
+      expect.objectContaining({ method: 'PUT' }),
+    )
+  })
+
+  it('returns a normalized public URL when the endpoint has a trailing slash', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(new Response(null, { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const publicUrl = await createSupabaseUploader().uploadBuffer(
+      Buffer.from('image'),
+      'images/test.png',
+      'image/png',
+    )
+
+    expect(publicUrl).toBe(
+      'https://project-ref.storage.supabase.co/storage/v1/s3/blog-assets/images/test.png',
+    )
+  })
+
+  it('preserves the endpoint path for deletes', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(new Response(null, { status: 204 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await createSupabaseUploader().deleteObject('images/test.png')
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://project-ref.storage.supabase.co/storage/v1/s3/blog-assets/images/test.png',
+      expect.objectContaining({ method: 'DELETE' }),
+    )
+  })
+
+  it('preserves the endpoint path for multipart uploads', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response('<UploadId>test-upload-id</UploadId>', { status: 200 }),
+      )
+      .mockResolvedValueOnce(
+        new Response(null, {
+          status: 200,
+          headers: { etag: '"test-etag"' },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response('<CompleteMultipartUploadResult />', { status: 200 }),
+      )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await createSupabaseUploader().uploadStream(
+      Readable.from([Buffer.from('video')]),
+      'videos/test.mp4',
+      'video/mp4',
+    )
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      'https://project-ref.storage.supabase.co/storage/v1/s3/blog-assets/videos/test.mp4?uploads=',
+      expect.objectContaining({ method: 'POST' }),
+    )
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      'https://project-ref.storage.supabase.co/storage/v1/s3/blog-assets/videos/test.mp4?partNumber=1&uploadId=test-upload-id',
+      expect.objectContaining({ method: 'PUT' }),
+    )
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      3,
+      'https://project-ref.storage.supabase.co/storage/v1/s3/blog-assets/videos/test.mp4?uploadId=test-upload-id',
+      expect.objectContaining({ method: 'POST' }),
+    )
   })
 })
