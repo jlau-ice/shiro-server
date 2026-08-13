@@ -25,9 +25,12 @@ const {
   JWT_SECRET,
   JWTSECRET,
   MX_DISABLE_TELEMETRY,
+  UPSTASH_REDIS_REDIS_URL,
 } = process.env
 
 const ENV_JWT_SECRET = JWT_SECRET || JWTSECRET
+const ENV_REDIS_CONNECTION_STRING =
+  process.env.REDIS_CONNECTION_STRING || UPSTASH_REDIS_REDIS_URL
 const ENCRYPT_KEY_FROM_ENV = MX_ENCRYPT_KEY || ENV_ENCRYPT_KEY
 const ENCRYPT_ENABLE_FROM_ENV = MX_ENCRYPT_ENABLE || ENV_ENCRYPT_ENABLE
 
@@ -120,7 +123,11 @@ const commander = program
   .option('--demo', 'enable demo mode')
 
   // redis
-  .option('--redis_connection_string <string>', 'redis connection string')
+  .option(
+    '--redis_connection_string <string>',
+    'redis connection string',
+    ENV_REDIS_CONNECTION_STRING,
+  )
   .option('--redis_host <string>', 'redis host')
   .option('--redis_port <number>', 'redis port')
   .option('--redis_password <string>', 'redis password')
