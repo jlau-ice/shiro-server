@@ -15,6 +15,17 @@ export class CompanionPresenceReaper implements OnModuleInit, OnModuleDestroy {
 
   onModuleInit() {
     if (!this.store.isAvailable) return
+
+    const disabledByEnv = process.env.MX_DISABLE_COMPANION_PRESENCE_REAPER
+    const disabled =
+      disabledByEnv === undefined
+        ? Boolean(process.env.VERCEL)
+        : disabledByEnv === 'true'
+    if (disabled) {
+      this.logger.log('Companion presence reaper disabled')
+      return
+    }
+
     this.timer = setInterval(() => void this.reap(), REAPER_INTERVAL_MS)
     this.timer.unref?.()
   }

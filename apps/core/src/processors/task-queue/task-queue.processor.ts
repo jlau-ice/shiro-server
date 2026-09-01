@@ -28,6 +28,7 @@ export class TaskQueueProcessor implements OnModuleInit, OnModuleDestroy {
   private handlers = new Map<string, TaskHandler>()
   private activeTaskCount = 0
   private lastRedisUnavailableWarnAt = 0
+  private nextPollIntervalMs: number = TASK_QUEUE_LIMITS.processorPollIntervalMs
 
   constructor(
     @Inject(forwardRef(() => TaskQueueService))
@@ -64,8 +65,24 @@ export class TaskQueueProcessor implements OnModuleInit, OnModuleDestroy {
   start() {
     if (this.isRunning) return
     this.isRunning = true
+    this.resetPollInterval()
     this.logger.log(`Task processor started: workerId=${this.workerId}`)
-    this.poll()
+    void this.poll()
+  }
+
+  /**
+   * Wake an idle processor as soon as work is enqueued. This lets the normal
+   * empty-queue polling back off aggressively without adding task latency.
+   */
+  wake() {
+    if (!this.isRunning) return
+
+    this.resetPollInterval()
+    if (!this.pollTimeoutId) return
+
+    clearTimeout(this.pollTimeoutId)
+    this.pollTimeoutId = setTimeout(() => void this.poll(), 0)
+    this.pollTimeoutId.unref?.()
   }
 
   stop() {
@@ -86,25 +103,32 @@ export class TaskQueueProcessor implements OnModuleInit, OnModuleDestroy {
 
   private async poll() {
     if (!this.isRunning) return
+    this.pollTimeoutId = null
 
     try {
       if (!this.taskService.isRedisReady()) {
         this.warnRedisUnavailable('Task processor waiting for Redis connection')
+        this.backoffPollInterval()
         this.scheduleNextPoll()
         return
       }
 
       if (this.activeTaskCount >= TASK_QUEUE_LIMITS.maxConcurrency) {
+        this.resetPollInterval()
         this.scheduleNextPoll()
         return
       }
 
       const taskId = await this.taskService.acquireTask(this.workerId)
       if (taskId) {
+        this.resetPollInterval()
         this.activeTaskCount++
         this.processTask(taskId).finally(() => {
           this.activeTaskCount--
+          this.wake()
         })
+      } else {
+        this.backoffPollInterval()
       }
     } catch (error) {
       if (this.taskService.isRedisUnavailableError(error)) {
@@ -112,6 +136,7 @@ export class TaskQueueProcessor implements OnModuleInit, OnModuleDestroy {
       } else {
         this.logger.error(`Poll error: ${error.message}`, error.stack)
       }
+      this.backoffPollInterval()
     }
 
     this.scheduleNextPoll()
@@ -119,8 +144,21 @@ export class TaskQueueProcessor implements OnModuleInit, OnModuleDestroy {
 
   private scheduleNextPoll() {
     this.pollTimeoutId = setTimeout(
-      () => this.poll(),
-      TASK_QUEUE_LIMITS.processorPollIntervalMs,
+      () => void this.poll(),
+      this.nextPollIntervalMs,
+    )
+    this.pollTimeoutId.unref?.()
+  }
+
+  private resetPollInterval() {
+    this.nextPollIntervalMs = TASK_QUEUE_LIMITS.processorPollIntervalMs
+  }
+
+  private backoffPollInterval() {
+    this.nextPollIntervalMs = Math.min(
+      this.nextPollIntervalMs *
+        TASK_QUEUE_LIMITS.processorIdlePollBackoffMultiplier,
+      TASK_QUEUE_LIMITS.processorIdlePollMaxIntervalMs,
     )
   }
 

@@ -1,6 +1,11 @@
+import { afterEach, describe, expect, it, vi } from 'vitest'
+
 import { TaskQueueProcessor } from '~/processors/task-queue/task-queue.processor'
 import { TaskQueueRecovery } from '~/processors/task-queue/task-queue.recovery'
-import { describe, expect, it, vi } from 'vitest'
+
+afterEach(() => {
+  vi.useRealTimers()
+})
 
 describe('Task queue bootstrap', () => {
   it('skips polling until redis is ready', async () => {
@@ -53,5 +58,28 @@ describe('Task queue bootstrap', () => {
         redisStatus: 'connecting',
       }),
     )
+  })
+
+  it('backs off while idle and wakes immediately when work arrives', async () => {
+    vi.useFakeTimers()
+    const taskService = {
+      isRedisReady: vi.fn(() => true),
+      getRedisStatus: vi.fn(() => 'ready'),
+      isRedisUnavailableError: vi.fn(() => false),
+      acquireTask: vi.fn().mockResolvedValue(null),
+    }
+
+    const processor = new TaskQueueProcessor(taskService as any)
+    ;(processor as any).isRunning = true
+    await (processor as any).poll()
+
+    expect((processor as any).nextPollIntervalMs).toBe(2000)
+    expect(taskService.acquireTask).toHaveBeenCalledTimes(1)
+
+    processor.wake()
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(taskService.acquireTask).toHaveBeenCalledTimes(2)
+    processor.stop()
   })
 })

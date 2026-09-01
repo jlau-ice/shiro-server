@@ -42,7 +42,9 @@ export const TASK_QUEUE_LIMITS = {
   maxRetries: 3,
   maxConcurrency: 10,
   recoveryBatchSize: 10,
-  recoveryIntervalMs: 30 * 1000,
+  recoveryIntervalMs: 15 * 60 * 1000,
   processorPollIntervalMs: 1000,
+  processorIdlePollMaxIntervalMs: 5 * 60 * 1000,
+  processorIdlePollBackoffMultiplier: 2,
   cancelCheckIntervalMs: 2000,
 } as const

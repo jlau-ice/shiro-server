@@ -172,6 +172,9 @@ export class TaskQueueService implements OnModuleDestroy {
           (existingTask.status === TaskStatus.Pending ||
             existingTask.status === TaskStatus.Running)
         ) {
+          if (existingTask.status === TaskStatus.Pending) {
+            this.processor.wake()
+          }
           return { taskId: existingTaskId, created: false }
         }
       }
@@ -245,6 +248,7 @@ export class TaskQueueService implements OnModuleDestroy {
 
     const snapshot = parseTask(taskData, [])
     this.emitter.emitCreated(snapshot)
+    this.processor.wake()
 
     return { taskId, created: true }
   }
